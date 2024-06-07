@@ -1,14 +1,22 @@
+import functools
 import inspect
+import os
+import shutil
 import sys
 from functools import wraps
 from types import FrameType
+from typing import Optional
 
-from pprintpp import pformat
+import icdiff
+import pprintpp
 from termcolor import colored
 
 
 def eprintln(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+
+
+pformat = functools.partial(pprintpp.pformat, indent=2, width=1)
 
 
 def __get_lines_of_frame_source(frame: FrameType, start: int, end: int):
@@ -33,29 +41,77 @@ class GlobalConfig:
         "other_message_color",
         "code_color",
         "line_number_color",
+        "comment_message_attrs",
+        "file_path_color",
+        "show_source_info",
+        "classic_eq",
         "exit",
     )
 
-    def __init__(self, **kwargs):
-        self.set(**kwargs)
-
-    def set(self, **kwargs):
-        kwargs.setdefault("comment_message_color", "red")
-        kwargs.setdefault("other_message_color", "white")
-        kwargs.setdefault("code_color", "yellow")
-        kwargs.setdefault("line_number_color", "grey")
-        kwargs.setdefault("exit", True)
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        return self
+    def __init__(
+        self,
+        comment_message_color="red",
+        comment_message_attrs=["bold"],
+        other_message_color=None,
+        file_path_color=None,
+        code_color="yellow",
+        line_number_color="grey",
+        exit=True,
+        classic_eq=False,
+        show_source_info=True,
+    ):
+        os.system("color")
+        self.comment_message_color = comment_message_color
+        self.comment_message_attrs = comment_message_attrs
+        self.other_message_color = other_message_color
+        self.file_path_color = file_path_color
+        self.code_color = code_color
+        self.line_number_color = line_number_color
+        self.classic_eq = classic_eq
+        self.exit = exit
+        self.show_source_info = show_source_info
 
 
 global_config = None
 
 
-def init(**kwargs):
+def init(
+    comment_message_color="red",
+    comment_message_attrs=["bold"],
+    other_message_color: Optional[str] = None,
+    file_path_color: Optional[str] = None,
+    code_color="yellow",
+    line_number_color="grey",
+    classic_eq=False,
+    exit=True,
+    show_source_info=True,
+):
+    """
+    Initialize the global config.
+
+    Args:
+        `comment_message_color` (str, optional): The color of the comment message. Defaults to "red".
+        `comment_message_attrs` (list, optional): The attributes of the comment message. Defaults to ["bold"].
+        `other_message_color` (str, optional): The color of the other message. Defaults to None.
+        `file_path_color` (str, optional): The color of the file path. Defaults to None.
+        `code_color` (str, optional): The color of the code. Defaults to "yellow".
+        `line_number_color` (str, optional): The color of the line number. Defaults to "grey".
+        `exit` (bool, optional): Whether to exit the program after the assertion. Defaults to True. If set to False, an AssertionError will be raised.
+        `classic_eq` (bool, optional): Whether to use the classic equality check style (like `assert_gt`, `assert_lt`... do) for `assert_eq`. Defaults to False.
+        `show_source_info` (bool, optional): Whether to show the source code information, including filename and code. Defaults to True.
+    """
     global global_config
-    global_config = GlobalConfig(**kwargs)
+    global_config = GlobalConfig(
+        comment_message_color=comment_message_color,
+        comment_message_attrs=comment_message_attrs,
+        other_message_color=other_message_color,
+        file_path_color=file_path_color,
+        code_color=code_color,
+        line_number_color=line_number_color,
+        exit=exit,
+        classic_eq=classic_eq,
+        show_source_info=show_source_info,
+    )
 
     return global_config
 
@@ -64,6 +120,32 @@ def _get_or_init(**kwargs):
     global global_config
     if global_config is None:
         global_config = GlobalConfig(**kwargs)
+
+
+def diff(a, b):
+    COLS = shutil.get_terminal_size().columns - 13
+    lines_a = pformat(a).splitlines()
+    lines_b = pformat(b).splitlines()
+    differ = icdiff.ConsoleDiff(
+        cols=COLS,
+        highlight=True,
+        tabsize=2,
+        strip_trailing_cr=True,
+    )
+    icdiff_lines = list(differ.make_table(lines_a, lines_b, context=True))
+    return "\n".join(icdiff_lines)
+
+
+def general_diff(a, b, leading="", middle=" "):
+    return "".join(
+        (
+            colored(leading, global_config.other_message_color),
+            " ",
+            colored(pformat(a), "red"),
+            colored(middle, global_config.other_message_color),
+            colored(pformat(b), "green"),
+        )
+    )
 
 
 def pretty_wrapper(func, *args):
@@ -75,7 +157,7 @@ def pretty_wrapper(func, *args):
         result: bool = func(*args[:args_len])
         comment = args[-1] if len(args) > args_len else None
         if result:
-            return True
+            return result
 
         frame = inspect.currentframe().f_back
         filename = inspect.getfile(frame)
@@ -84,38 +166,128 @@ def pretty_wrapper(func, *args):
         end = frame_stack.positions.end_lineno
         source_code = __get_lines_of_frame_source(frame, start, end)
 
-        eprintln(f"Assertion Error in `{filename}`, line {start}:")
-        for line_index, line in enumerate(source_code):
+        if global_config.show_source_info:
             eprintln(
-                colored(line_index + start, global_config.line_number_color),
-                "  ",
-                colored(line.rstrip(), global_config.code_color),
-                sep="",
+                colored(
+                    f"{colored('Assertion Failed', attrs=['bold'])} in ",
+                    global_config.other_message_color,
+                ),
+                colored(filename, global_config.file_path_color),
+                ":",
+                sep="`",
             )
+            for line_index, line in enumerate(source_code):
+                eprintln(
+                    colored(line_index + start, global_config.line_number_color),
+                    colored(line.rstrip(), global_config.code_color),
+                    sep="  ",
+                )
 
         if comment is not None:
             eprintln(
-                f"Comment: {colored(comment, global_config.comment_message_color)}"
+                colored("Comment:", global_config.other_message_color),
+                colored(
+                    comment,
+                    global_config.comment_message_color,
+                    attrs=global_config.comment_message_attrs,
+                ),
+                sep=" ",
             )
-        sys.exit(1)
+        if global_config.exit:
+            sys.exit(1)
+        else:
+            raise AssertionError
 
     return wrapper
 
 
 @pretty_wrapper
-def assert_eq(a, b):
-    result = a == b
-    if result:
+def assert_(a):
+    if a:
         return True
-    str_a = pformat(a)
-    str_b = pformat(b)
-    eprintln(f"Not equal: {colored(str_a, 'red')} != {colored(str_b, 'green')}")
+    eprintln(general_diff(a, True, "Not True:", " is not "))
     return False
 
 
-assert_eq(1, 1)
-assert_eq(
-    1,
-    2,
-    "message",
-)
+@pretty_wrapper
+def assert_eq(a, b):
+    if a == b:
+        return True
+    if global_config.classic_eq:
+        eprintln(general_diff(a, b, "Not equal:", " != "))
+        return False
+    eprintln(colored("Not equal:", global_config.other_message_color))
+    eprintln(diff(a, b))
+    return False
+
+
+@pretty_wrapper
+def assert_ne(a, b):
+    if a != b:
+        return True
+    eprintln(general_diff(a, b, "Equal:", " == "))
+    return False
+
+
+@pretty_wrapper
+def assert_gt(a, b):
+    if a > b:
+        return True
+    eprintln(general_diff(a, b, "Not greater than:", " <= "))
+    return False
+
+
+@pretty_wrapper
+def assert_lt(a, b):
+    if a < b:
+        return True
+    eprintln(general_diff(a, b, "Not less than:", " >= "))
+    return False
+
+
+@pretty_wrapper
+def assert_ge(a, b):
+    if a >= b:
+        return True
+    eprintln(general_diff(a, b, "Not greater than or equal to:", " < "))
+    return False
+
+
+@pretty_wrapper
+def assert_le(a, b):
+    if a <= b:
+        return True
+    eprintln(general_diff(a, b, "Not less than or equal to:", " > "))
+    return False
+
+
+@pretty_wrapper
+def assert_in(a, b):
+    if a in b:
+        return True
+    eprintln(general_diff(a, b, "Not in:", " is not in "))
+    return False
+
+
+@pretty_wrapper
+def assert_not_in(a, b):
+    if a not in b:
+        return True
+    eprintln(general_diff(a, b, "In:", " in "))
+    return False
+
+
+@pretty_wrapper
+def assert_is(a, b):
+    if a is b:
+        return True
+    eprintln(general_diff(a, b, "Not is:", " is not "))
+    return False
+
+
+@pretty_wrapper
+def assert_is_not(a, b):
+    if a is not b:
+        return True
+    eprintln(general_diff(a, b, "Is:", " is "))
+    return False
