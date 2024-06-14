@@ -3,6 +3,7 @@ from pretty_assert import (
     assert_eq,
     assert_ge,
     assert_gt,
+    assert_if,
     assert_in,
     assert_le,
     assert_lt,
@@ -22,3 +23,4 @@ assert_ge(some_number, 1, "some_number is not greater than or equal to 1")
 assert_le(some_number, 1, "some_number is greater than or equal to 1")
 assert_in(some_number, [1, 2], "some_number is not in [1, 2]")
 assert_not_in(some_number, [2, 3], "some_number is in [2, 3]")
+assert_if("123456", "457", lambda x, y: x.endswith(y), "123456 not end with 456")

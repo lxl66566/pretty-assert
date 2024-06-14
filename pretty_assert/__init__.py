@@ -5,18 +5,14 @@ import shutil
 import sys
 from functools import wraps
 from types import FrameType
-from typing import Optional
+from typing import Callable, Iterable, Optional
 
 import icdiff
 import pprintpp
 from termcolor import colored
 
-
-def eprintln(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
-
-
 pformat = functools.partial(pprintpp.pformat, indent=2, width=1)
+eprintln = functools.partial(print, file=sys.stderr)
 
 
 def __get_lines_of_frame_source(frame: FrameType, start: int, end: int):
@@ -31,8 +27,15 @@ def __get_lines_of_frame_source(frame: FrameType, start: int, end: int):
     Returns:
         list: A list of source code lines between the specified start and end line numbers.
     """
+
+    # source_lines start from 0
+    # source_start_number is 0 if the frame contains the whole file;
+    # source_start_number will be actual number (start from 1) if the frame contains part of the file.
+
     source_lines, source_start_number = inspect.getsourcelines(frame)
-    return source_lines[start - source_start_number - 1 : end - source_start_number]
+    if source_start_number == 0:
+        source_start_number = 1
+    return source_lines[start - source_start_number : end - source_start_number + 1]
 
 
 class GlobalConfig:
@@ -136,7 +139,7 @@ def diff(a, b):
     return "\n".join(icdiff_lines)
 
 
-def general_diff(a, b, leading="", middle=" "):
+def general_diff(a, b, leading="", middle=" ", trailing=""):
     return "".join(
         (
             colored(leading, global_config.other_message_color),
@@ -144,6 +147,7 @@ def general_diff(a, b, leading="", middle=" "):
             colored(pformat(a), "red"),
             colored(middle, global_config.other_message_color),
             colored(pformat(b), "green"),
+            colored(trailing, global_config.other_message_color),
         )
     )
 
@@ -214,7 +218,7 @@ def assert_eq(a, b):
     if a == b:
         return True
     if global_config.classic_eq:
-        eprintln(general_diff(a, b, "Not equal:", " != "))
+        eprintln(general_diff(a, b, "Found not equal:", " != "))
         return False
     eprintln(colored("Not equal:", global_config.other_message_color))
     eprintln(diff(a, b))
@@ -225,7 +229,7 @@ def assert_eq(a, b):
 def assert_ne(a, b):
     if a != b:
         return True
-    eprintln(general_diff(a, b, "Equal:", " == "))
+    eprintln(general_diff(a, b, "Found equal:", " == "))
     return False
 
 
@@ -233,7 +237,7 @@ def assert_ne(a, b):
 def assert_gt(a, b):
     if a > b:
         return True
-    eprintln(general_diff(a, b, "Not greater than:", " <= "))
+    eprintln(general_diff(a, b, "Found not greater than:", " <= "))
     return False
 
 
@@ -241,7 +245,7 @@ def assert_gt(a, b):
 def assert_lt(a, b):
     if a < b:
         return True
-    eprintln(general_diff(a, b, "Not less than:", " >= "))
+    eprintln(general_diff(a, b, "Found not less than:", " >= "))
     return False
 
 
@@ -249,7 +253,7 @@ def assert_lt(a, b):
 def assert_ge(a, b):
     if a >= b:
         return True
-    eprintln(general_diff(a, b, "Not greater than or equal to:", " < "))
+    eprintln(general_diff(a, b, "Found less:", " < "))
     return False
 
 
@@ -257,23 +261,23 @@ def assert_ge(a, b):
 def assert_le(a, b):
     if a <= b:
         return True
-    eprintln(general_diff(a, b, "Not less than or equal to:", " > "))
+    eprintln(general_diff(a, b, "Found greater:", " > "))
     return False
 
 
 @pretty_wrapper
-def assert_in(a, b):
+def assert_in(a, b: Iterable):
     if a in b:
         return True
-    eprintln(general_diff(a, b, "Not in:", " is not in "))
+    eprintln(general_diff(a, b, "Found not in:", " is not in "))
     return False
 
 
 @pretty_wrapper
-def assert_not_in(a, b):
+def assert_not_in(a, b: Iterable):
     if a not in b:
         return True
-    eprintln(general_diff(a, b, "In:", " in "))
+    eprintln(general_diff(a, b, "Found in:", " in "))
     return False
 
 
@@ -281,7 +285,7 @@ def assert_not_in(a, b):
 def assert_is(a, b):
     if a is b:
         return True
-    eprintln(general_diff(a, b, "Not is:", " is not "))
+    eprintln(general_diff(a, b, "Found not is:", " is not "))
     return False
 
 
@@ -289,5 +293,15 @@ def assert_is(a, b):
 def assert_is_not(a, b):
     if a is not b:
         return True
-    eprintln(general_diff(a, b, "Is:", " is "))
+    eprintln(general_diff(a, b, "Found is:", " is "))
+    return False
+
+
+@pretty_wrapper
+def assert_if(a, b, verify_func: Callable):
+    if verify_func(a, b):
+        return True
+    eprintln(
+        general_diff(a, b, "Not satisfied:", ", ", trailing=" not satisfy function")
+    )
     return False

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pretty-assert"
-version = "0.1.0"
+version = "0.1.1"
 description = "A python package to print pretty, user-friendly assertions."
 authors = ["lxl66566 <lxl66566@gmail.com>"]
 readme = "README.md"
